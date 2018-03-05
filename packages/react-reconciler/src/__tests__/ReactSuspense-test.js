@@ -288,6 +288,60 @@ describe('ReactSuspense', () => {
     expect(ReactNoop.getChildren()).toEqual([span('Async'), span('Sync')]);
   });
 
+  it('switches to an inner fallback even if it expires later', async () => {
+    ReactNoop.render(
+      <Fallback timeout={1000} placeholder={<Text text="Loading outer..." />}>
+        <Fallback timeout={2000} placeholder={<Text text="Loading inner..." />}>
+          <AsyncText text="Async" ms={20000} />
+        </Fallback>
+        <Text text="Sync" />
+      </Fallback>,
+    );
+
+    expect(ReactNoop.flush()).toEqual([
+      // The async child suspends
+      'Suspend! [Async]',
+      // Continue on the sibling
+      'Sync',
+    ]);
+    // The update hasn't expired yet, so we commit nothing.
+    expect(ReactNoop.getChildren()).toEqual([]);
+
+    // Expire the outer timeout, but don't expire the inner one.
+    // We should see the outer loading placeholder.
+    ReactNoop.expire(1500);
+    await advanceTimers(1500);
+    expect(ReactNoop.flush()).toEqual([
+      // Still suspended.
+      'Suspend! [Async]',
+      'Sync',
+      // Now that the outer update has expired, we render the fallback UI
+      'Loading outer...',
+    ]);
+    expect(ReactNoop.getChildren()).toEqual([span('Loading outer...')]);
+
+    // Advance just enough to also expire the inner timeout.
+    ReactNoop.expire(1000);
+    await advanceTimers(1000);
+    expect(ReactNoop.flush()).toEqual([
+      // Still suspended.
+      'Suspend! [Async]',
+      'Loading inner...',
+      'Sync',
+    ]);
+    // We should now see the inner fallback UI.
+    expect(ReactNoop.getChildren()).toEqual([
+      span('Loading inner...'),
+      span('Sync'),
+    ]);
+
+    // Finally, we should see the complete screen.
+    ReactNoop.expire(20000);
+    await advanceTimers(20000);
+    expect(ReactNoop.flush()).toEqual(['Promise resolved [Async]', 'Async']);
+    expect(ReactNoop.getChildren()).toEqual([span('Async'), span('Sync')]);
+  });
+
   it('renders an expiration boundary synchronously', async () => {
     // Synchronously render a tree that suspends
     ReactNoop.flushSync(() =>
