@@ -1084,6 +1084,8 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
     }
 
     const newChildren = render(newValue);
+    // React DevTools reads this flag.
+    workInProgress.effectTag |= PerformedWork;
     reconcileChildren(current, workInProgress, newChildren);
     return workInProgress.child;
   }
