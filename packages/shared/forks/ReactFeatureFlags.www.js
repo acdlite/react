@@ -12,12 +12,11 @@ import typeof * as FeatureFlagsShimType from './ReactFeatureFlags.www';
 
 // Re-export dynamic flags from the www version.
 export const {
-  enableGetDerivedStateFromCatch,
-  enableSuspense,
   debugRenderPhaseSideEffects,
   debugRenderPhaseSideEffectsForStrictMode,
-  warnAboutDeprecatedLifecycles,
+  enableGetDerivedStateFromCatch,
   replayFailedUnitOfWorkWithInvokeGuardedCallback,
+  warnAboutDeprecatedLifecycles,
 } = require('ReactFeatureFlags');
 
 // The rest of the flags are static for better dead code elimination.
