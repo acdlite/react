@@ -41,10 +41,12 @@ import {
   HostPortal,
 } from 'shared/ReactTypeOfWork';
 import {
+  enableProfilerTimer,
   enableUserTimingAPI,
-  warnAboutDeprecatedLifecycles,
   replayFailedUnitOfWorkWithInvokeGuardedCallback,
+  warnAboutDeprecatedLifecycles,
 } from 'shared/ReactFeatureFlags';
+import {createProfilerTimer} from './ReactProfilerTimer';
 import getComponentName from 'shared/getComponentName';
 import invariant from 'fbjs/lib/invariant';
 import warning from 'fbjs/lib/warning';
@@ -94,7 +96,7 @@ import {
   expirationTimeToMs,
   computeExpirationBucket,
 } from './ReactFiberExpirationTime';
-import {AsyncMode} from './ReactTypeOfMode';
+import {AsyncMode, ProfileMode} from './ReactTypeOfMode';
 import ReactFiberLegacyContext from './ReactFiberContext';
 import ReactFiberNewContext from './ReactFiberNewContext';
 import {enqueueUpdate, resetCurrentlyProcessingQueue} from './ReactUpdateQueue';
@@ -167,10 +169,18 @@ if (__DEV__) {
 export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
   config: HostConfig<T, P, I, TI, HI, PI, C, CC, CX, PL>,
 ) {
+  const {
+    now,
+    scheduleDeferredCallback,
+    cancelDeferredCallback,
+    prepareForCommit,
+    resetAfterCommit,
+  } = config;
   const stack = ReactFiberStack();
   const hostContext = ReactFiberHostContext(config, stack);
   const legacyContext = ReactFiberLegacyContext(stack);
   const newContext = ReactFiberNewContext(stack);
+  const profilerTimer = createProfilerTimer(now);
   const {popHostContext, popHostContainer} = hostContext;
   const {
     popTopLevelContextObject: popTopLevelLegacyContextObject,
@@ -188,7 +198,7 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
     hydrationContext,
     scheduleWork,
     computeExpirationForFiber,
-    recalculateCurrentTime,
+    profilerTimer,
   );
   const {completeWork} = ReactFiberCompleteWork(
     config,
@@ -196,6 +206,7 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
     legacyContext,
     newContext,
     hydrationContext,
+    profilerTimer,
   );
   const {
     throwException,
@@ -204,6 +215,7 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
     createRootErrorUpdate,
     createClassErrorUpdate,
   } = ReactFiberUnwindWork(
+    config,
     hostContext,
     legacyContext,
     newContext,
@@ -213,8 +225,7 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
     markLegacyErrorBoundaryAsFailed,
     isAlreadyFailedLegacyErrorBoundary,
     onUncaughtError,
-    suspendRoot,
-    retrySuspendedRoot,
+    profilerTimer,
   );
   const {
     commitBeforeMutationLifeCycles,
@@ -233,13 +244,16 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
     markLegacyErrorBoundaryAsFailed,
     recalculateCurrentTime,
   );
+
   const {
-    now,
-    scheduleDeferredCallback,
-    cancelDeferredCallback,
-    prepareForCommit,
-    resetAfterCommit,
-  } = config;
+    checkActualRenderTimeStackEmpty,
+    pauseActualRenderTimerIfRunning,
+    recordElapsedBaseRenderTimeIfRunning,
+    resetActualRenderTimer,
+    resumeActualRenderTimerIfPaused,
+    startBaseRenderTimer,
+    stopBaseRenderTimerIfRunning,
+  } = profilerTimer;
 
   // Represents the current time in ms.
   const originalStartTimeMs = now();
@@ -336,6 +350,11 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
       originalReplayError = null;
       if (hasCaughtError()) {
         clearCaughtError();
+
+        if (enableProfilerTimer) {
+          // Stop "base" render timer again (after the re-thrown error).
+          stopBaseRenderTimerIfRunning();
+        }
       } else {
         // If the begin phase did not fail the second time, set this pointer
         // back to the original value.
@@ -682,6 +701,13 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
       }
     }
 
+    if (enableProfilerTimer) {
+      if (__DEV__) {
+        checkActualRenderTimeStackEmpty();
+      }
+      resetActualRenderTimer();
+    }
+
     isCommitting = false;
     isWorking = false;
     stopCommitLifeCyclesTimer();
@@ -728,17 +754,36 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
     // TODO: Calls need to visit stateNode
 
     // Bubble up the earliest expiration time.
-    let child = workInProgress.child;
-    while (child !== null) {
-      if (
-        child.expirationTime !== NoWork &&
-        (newExpirationTime === NoWork ||
-          newExpirationTime > child.expirationTime)
-      ) {
-        newExpirationTime = child.expirationTime;
+    // (And "base" render timers if that feature flag is enabled)
+    if (enableProfilerTimer && workInProgress.mode & ProfileMode) {
+      let treeBaseTime = workInProgress.selfBaseTime;
+      let child = workInProgress.child;
+      while (child !== null) {
+        treeBaseTime += child.treeBaseTime;
+        if (
+          child.expirationTime !== NoWork &&
+          (newExpirationTime === NoWork ||
+            newExpirationTime > child.expirationTime)
+        ) {
+          newExpirationTime = child.expirationTime;
+        }
+        child = child.sibling;
       }
-      child = child.sibling;
+      workInProgress.treeBaseTime = treeBaseTime;
+    } else {
+      let child = workInProgress.child;
+      while (child !== null) {
+        if (
+          child.expirationTime !== NoWork &&
+          (newExpirationTime === NoWork ||
+            newExpirationTime > child.expirationTime)
+        ) {
+          newExpirationTime = child.expirationTime;
+        }
+        child = child.sibling;
+      }
     }
+
     workInProgress.expirationTime = newExpirationTime;
   }
 
@@ -920,7 +965,19 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
         workInProgress,
       );
     }
-    let next = beginWork(current, workInProgress, nextRenderExpirationTime);
+
+    let next;
+    if (enableProfilerTimer) {
+      startBaseRenderTimer();
+      next = beginWork(current, workInProgress, nextRenderExpirationTime);
+
+      // Update "base" time if the render wasn't bailed out on.
+      recordElapsedBaseRenderTimeIfRunning(workInProgress);
+      stopBaseRenderTimerIfRunning();
+    } else {
+      next = beginWork(current, workInProgress, nextRenderExpirationTime);
+    }
+
     if (__DEV__) {
       ReactDebugCurrentFiber.resetCurrentFiber();
       if (isReplayingFailedUnitOfWork) {
@@ -955,6 +1012,12 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
       // Flush asynchronous work until the deadline runs out of time.
       while (nextUnitOfWork !== null && !shouldYield()) {
         nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
+      }
+
+      if (enableProfilerTimer) {
+        // If we didn't finish, pause the "actual" render timer.
+        // We'll restart it when we resume work.
+        pauseActualRenderTimerIfRunning();
       }
     }
   }
@@ -1013,6 +1076,11 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
       try {
         workLoop(isAsync);
       } catch (thrownValue) {
+        if (enableProfilerTimer) {
+          // Stop "base" render timer in the event of an error.
+          stopBaseRenderTimerIfRunning();
+        }
+
         if (nextUnitOfWork === null) {
           // This is a fatal error.
           didFatal = true;
@@ -1638,6 +1706,10 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
     // the deadline.
     findHighestPriorityRoot();
 
+    if (enableProfilerTimer) {
+      resumeActualRenderTimerIfPaused();
+    }
+
     if (enableUserTimingAPI && deadline !== null) {
       const didExpire = nextFlushedExpirationTime < recalculateCurrentTime();
       const timeout = expirationTimeToMs(nextFlushedExpirationTime);
@@ -1783,6 +1855,12 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
             // There's no time left. Mark this root as complete. We'll come
             // back and commit it later.
             root.finishedWork = finishedWork;
+
+            if (enableProfilerTimer) {
+              // If we didn't finish, pause the "actual" render timer.
+              // We'll restart it when we resume work.
+              pauseActualRenderTimerIfRunning();
+            }
           }
         }
       }

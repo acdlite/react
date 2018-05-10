@@ -8,10 +8,10 @@
 import assign from 'object-assign';
 import ReactVersion from 'shared/ReactVersion';
 import {
-  REACT_FRAGMENT_TYPE,
-  REACT_STRICT_MODE_TYPE,
   REACT_ASYNC_MODE_TYPE,
-  REACT_TIMEOUT_TYPE,
+  REACT_FRAGMENT_TYPE,
+  REACT_PROFILER_TYPE,
+  REACT_STRICT_MODE_TYPE,
 } from 'shared/ReactSymbols';
 import {enableSuspense} from 'shared/ReactFeatureFlags';
 
@@ -53,6 +53,7 @@ const React = {
   Fragment: REACT_FRAGMENT_TYPE,
   StrictMode: REACT_STRICT_MODE_TYPE,
   unstable_AsyncMode: REACT_ASYNC_MODE_TYPE,
+  unstable_Profiler: REACT_PROFILER_TYPE,
 
   createElement: __DEV__ ? createElementWithValidation : createElement,
   cloneElement: __DEV__ ? cloneElementWithValidation : cloneElement,

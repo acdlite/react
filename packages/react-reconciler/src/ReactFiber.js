@@ -15,6 +15,7 @@ import type {ExpirationTime} from './ReactFiberExpirationTime';
 import type {UpdateQueue} from './ReactUpdateQueue';
 
 import invariant from 'fbjs/lib/invariant';
+import {enableProfilerTimer} from 'shared/ReactFeatureFlags';
 import {NoEffect} from 'shared/ReactTypeOfSideEffect';
 import {
   IndeterminateComponent,
@@ -30,18 +31,19 @@ import {
   Mode,
   ContextProvider,
   ContextConsumer,
-  TimeoutComponent,
+  Profiler,
 } from 'shared/ReactTypeOfWork';
 import getComponentName from 'shared/getComponentName';
 
 import {NoWork} from './ReactFiberExpirationTime';
-import {NoContext, AsyncMode, StrictMode} from './ReactTypeOfMode';
+import {NoContext, AsyncMode, ProfileMode, StrictMode} from './ReactTypeOfMode';
 import {
   REACT_FORWARD_REF_TYPE,
   REACT_FRAGMENT_TYPE,
   REACT_RETURN_TYPE,
   REACT_CALL_TYPE,
   REACT_STRICT_MODE_TYPE,
+  REACT_PROFILER_TYPE,
   REACT_PROVIDER_TYPE,
   REACT_CONTEXT_TYPE,
   REACT_ASYNC_MODE_TYPE,
@@ -152,6 +154,10 @@ export type Fiber = {|
   // memory if we need to.
   alternate: Fiber | null,
 
+  // Profiling metrics
+  selfBaseTime?: number,
+  treeBaseTime?: number,
+
   // Conceptual aliases
   // workInProgress : Fiber ->  alternate The alternate used for reuse happens
   // to be the same as work in progress.
@@ -205,6 +211,11 @@ function FiberNode(
   this.expirationTime = NoWork;
 
   this.alternate = null;
+
+  if (enableProfilerTimer) {
+    this.selfBaseTime = 0;
+    this.treeBaseTime = 0;
+  }
 
   if (__DEV__) {
     this._debugID = debugCounter++;
@@ -300,6 +311,11 @@ export function createWorkInProgress(
   workInProgress.index = current.index;
   workInProgress.ref = current.ref;
 
+  if (enableProfilerTimer) {
+    workInProgress.selfBaseTime = current.selfBaseTime;
+    workInProgress.treeBaseTime = current.treeBaseTime;
+  }
+
   return workInProgress;
 }
 
@@ -345,6 +361,8 @@ export function createFiberFromElement(
         fiberTag = Mode;
         mode |= StrictMode;
         break;
+      case REACT_PROFILER_TYPE:
+        return createFiberFromProfiler(pendingProps, mode, expirationTime, key);
       case REACT_CALL_TYPE:
         fiberTag = CallComponent;
         break;
@@ -448,6 +466,35 @@ export function createFiberFromFragment(
   return fiber;
 }
 
+export function createFiberFromProfiler(
+  pendingProps: any,
+  mode: TypeOfMode,
+  expirationTime: ExpirationTime,
+  key: null | string,
+): Fiber {
+  if (__DEV__) {
+    if (
+      typeof pendingProps.id !== 'string' ||
+      typeof pendingProps.onRender !== 'function'
+    ) {
+      invariant(
+        false,
+        'Profiler must specify an "id" string and "onRender" function as props',
+      );
+    }
+  }
+
+  const fiber = createFiber(Profiler, pendingProps, key, mode | ProfileMode);
+  fiber.type = REACT_PROFILER_TYPE;
+  fiber.expirationTime = expirationTime;
+  fiber.stateNode = {
+    duration: 0,
+    startTime: 0,
+  };
+
+  return fiber;
+}
+
 export function createFiberFromText(
   content: string,
   mode: TypeOfMode,
@@ -517,6 +564,10 @@ export function assignFiberPropertiesInDEV(
   target.lastEffect = source.lastEffect;
   target.expirationTime = source.expirationTime;
   target.alternate = source.alternate;
+  if (enableProfilerTimer) {
+    target.selfBaseTime = source.selfBaseTime;
+    target.treeBaseTime = source.treeBaseTime;
+  }
   target._debugID = source._debugID;
   target._debugSource = source._debugSource;
   target._debugOwner = source._debugOwner;

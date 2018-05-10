@@ -15,11 +15,13 @@ import type {LegacyContext} from './ReactFiberContext';
 import type {NewContext} from './ReactFiberNewContext';
 import type {HydrationContext} from './ReactFiberHydrationContext';
 import type {FiberRoot} from './ReactFiberRoot';
+import type {ProfilerTimer} from './ReactProfilerTimer';
 
 import {
   enableMutatingReconciler,
   enablePersistentReconciler,
   enableNoopReconciler,
+  enableProfilerTimer,
 } from 'shared/ReactFeatureFlags';
 import {
   IndeterminateComponent,
@@ -37,7 +39,7 @@ import {
   ForwardRef,
   Fragment,
   Mode,
-  TimeoutComponent,
+  Profiler,
 } from 'shared/ReactTypeOfWork';
 import {Placement, Ref, Update} from 'shared/ReactTypeOfSideEffect';
 import invariant from 'fbjs/lib/invariant';
@@ -50,6 +52,7 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
   legacyContext: LegacyContext,
   newContext: NewContext,
   hydrationContext: HydrationContext<C, CX>,
+  profilerTimer: ProfilerTimer,
 ) {
   const {
     createInstance,
@@ -67,6 +70,8 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
     getHostContext,
     popHostContainer,
   } = hostContext;
+
+  const {recordElapsedActualRenderTime} = profilerTimer;
 
   const {
     popContextProvider: popLegacyContextProvider,
@@ -593,6 +598,11 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
       case Fragment:
         return null;
       case Mode:
+        return null;
+      case Profiler:
+        if (enableProfilerTimer) {
+          recordElapsedActualRenderTime(workInProgress);
+        }
         return null;
       case HostPortal:
         popHostContainer(workInProgress);

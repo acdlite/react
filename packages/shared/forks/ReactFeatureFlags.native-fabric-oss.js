@@ -19,6 +19,7 @@ export const enableGetDerivedStateFromCatch = false;
 export const enableSuspense = false;
 export const warnAboutDeprecatedLifecycles = false;
 export const replayFailedUnitOfWorkWithInvokeGuardedCallback = __DEV__;
+export const enableProfilerTimer = false;
 
 // React Fabric uses persistent reconciler.
 export const enableMutatingReconciler = false;

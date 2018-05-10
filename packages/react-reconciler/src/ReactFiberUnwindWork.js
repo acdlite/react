@@ -7,6 +7,7 @@
  * @flow
  */
 
+import type {HostConfig} from 'react-reconciler';
 import type {Fiber} from './ReactFiber';
 import type {FiberRoot} from './ReactFiberRoot';
 import type {ExpirationTime} from './ReactFiberExpirationTime';
@@ -14,6 +15,7 @@ import type {HostContext} from './ReactFiberHostContext';
 import type {LegacyContext} from './ReactFiberContext';
 import type {NewContext} from './ReactFiberNewContext';
 import type {CapturedValue} from './ReactCapturedValue';
+import type {ProfilerTimer} from './ReactProfilerTimer';
 import type {Update} from './ReactUpdateQueue';
 import type {SuspenseThenable} from 'shared/SuspenseThenable';
 
@@ -32,42 +34,21 @@ import {
   HostComponent,
   HostPortal,
   ContextProvider,
-  TimeoutComponent,
+  Profiler,
 } from 'shared/ReactTypeOfWork';
 import {
-  NoEffect,
   DidCapture,
   Incomplete,
+  NoEffect,
   ShouldCapture,
 } from 'shared/ReactTypeOfSideEffect';
-
-import {Sync} from './ReactFiberExpirationTime';
-
 import {
   enableGetDerivedStateFromCatch,
-  enableSuspense,
+  enableProfilerTimer,
 } from 'shared/ReactFeatureFlags';
 
-import invariant from 'fbjs/lib/invariant';
-
-function createRootExpirationError(sourceFiber, renderExpirationTime) {
-  try {
-    // TODO: Better error messages.
-    invariant(
-      renderExpirationTime !== Sync,
-      'A synchronous update was suspended, but no fallback UI was provided.',
-    );
-    invariant(
-      false,
-      'An update was suspended for longer than the timeout, but no fallback ' +
-        'UI was provided.',
-    );
-  } catch (error) {
-    return error;
-  }
-}
-
-export default function<C, CX>(
+export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
+  config: HostConfig<T, P, I, TI, HI, PI, C, CC, CX, PL>,
   hostContext: HostContext<C, CX>,
   legacyContext: LegacyContext,
   newContext: NewContext,
@@ -84,13 +65,7 @@ export default function<C, CX>(
   markLegacyErrorBoundaryAsFailed: (instance: mixed) => void,
   isAlreadyFailedLegacyErrorBoundary: (instance: mixed) => boolean,
   onUncaughtError: (error: mixed) => void,
-  suspendRoot: (
-    root: FiberRoot,
-    thenable: SuspenseThenable,
-    timeoutMs: number,
-    suspendedTime: ExpirationTime,
-  ) => void,
-  retrySuspendedRoot: (root: FiberRoot, suspendedTime: ExpirationTime) => void,
+  profilerTimer: ProfilerTimer,
 ) {
   const {popHostContainer, popHostContext} = hostContext;
   const {
@@ -98,6 +73,10 @@ export default function<C, CX>(
     popTopLevelContextObject: popTopLevelLegacyContextObject,
   } = legacyContext;
   const {popProvider} = newContext;
+  const {
+    resumeActualRenderTimerIfPaused,
+    recordElapsedActualRenderTime,
+  } = profilerTimer;
 
   function createRootErrorUpdate(
     fiber: Fiber,
@@ -411,6 +390,13 @@ export default function<C, CX>(
         break;
       case ContextProvider:
         popProvider(interruptedWork);
+        break;
+      case Profiler:
+        if (enableProfilerTimer) {
+          // Resume in case we're picking up on work that was paused.
+          resumeActualRenderTimerIfPaused();
+          recordElapsedActualRenderTime(interruptedWork);
+        }
         break;
       default:
         break;
