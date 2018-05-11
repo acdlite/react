@@ -32,6 +32,7 @@ import {
   ContextProvider,
   ContextConsumer,
   Profiler,
+  TimeoutComponent,
 } from 'shared/ReactTypeOfWork';
 import getComponentName from 'shared/getComponentName';
 

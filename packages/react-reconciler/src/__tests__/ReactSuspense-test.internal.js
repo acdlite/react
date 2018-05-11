@@ -41,10 +41,10 @@ describe('ReactSuspense', () => {
     textResourceShouldFail = false;
   });
 
-  // function div(...children) {
-  //   children = children.map(c => (typeof c === 'string' ? {text: c} : c));
-  //   return {type: 'div', children, prop: undefined};
-  // }
+  function div(...children) {
+    children = children.map(c => (typeof c === 'string' ? {text: c} : c));
+    return {type: 'div', children, prop: undefined};
+  }
 
   function span(prop) {
     return {type: 'span', children: [], prop};
@@ -193,7 +193,7 @@ describe('ReactSuspense', () => {
       return (
         <Fallback>
           <ErrorBoundary ref={errorBoundary}>
-            <AsyncText text="Result" ms={100} />
+            <AsyncText text="Result" ms={1000} />
           </ErrorBoundary>
         </Fallback>
       );
@@ -204,8 +204,8 @@ describe('ReactSuspense', () => {
     expect(ReactNoop.getChildren()).toEqual([]);
 
     textResourceShouldFail = true;
-    ReactNoop.expire(100);
-    await advanceTimers(100);
+    ReactNoop.expire(1000);
+    await advanceTimers(1000);
     textResourceShouldFail = false;
 
     expect(ReactNoop.flush()).toEqual([
@@ -222,8 +222,8 @@ describe('ReactSuspense', () => {
     cache.invalidate();
 
     expect(ReactNoop.flush()).toEqual(['Suspend! [Result]']);
-    ReactNoop.expire(100);
-    await advanceTimers(100);
+    ReactNoop.expire(1000);
+    await advanceTimers(1000);
     expect(ReactNoop.flush()).toEqual(['Promise resolved [Result]', 'Result']);
     expect(ReactNoop.getChildren()).toEqual([span('Result')]);
   });
@@ -248,9 +248,9 @@ describe('ReactSuspense', () => {
     const errorBoundary = React.createRef();
     function App() {
       return (
-        <Fallback timeout={50} placeholder={<Text text="Loading..." />}>
+        <Fallback timeout={1000} placeholder={<Text text="Loading..." />}>
           <ErrorBoundary ref={errorBoundary}>
-            <AsyncText text="Result" ms={100} />
+            <AsyncText text="Result" ms={3000} />
           </ErrorBoundary>
         </Fallback>
       );
@@ -260,14 +260,14 @@ describe('ReactSuspense', () => {
     expect(ReactNoop.flush()).toEqual(['Suspend! [Result]']);
     expect(ReactNoop.getChildren()).toEqual([]);
 
-    ReactNoop.expire(50);
-    await advanceTimers(50);
+    ReactNoop.expire(2000);
+    await advanceTimers(2000);
     expect(ReactNoop.flush()).toEqual(['Suspend! [Result]', 'Loading...']);
     expect(ReactNoop.getChildren()).toEqual([span('Loading...')]);
 
     textResourceShouldFail = true;
-    ReactNoop.expire(50);
-    await advanceTimers(50);
+    ReactNoop.expire(1000);
+    await advanceTimers(1000);
     textResourceShouldFail = false;
 
     expect(ReactNoop.flush()).toEqual([
@@ -284,8 +284,8 @@ describe('ReactSuspense', () => {
     cache.invalidate();
 
     expect(ReactNoop.flush()).toEqual(['Suspend! [Result]']);
-    ReactNoop.expire(100);
-    await advanceTimers(100);
+    ReactNoop.expire(3000);
+    await advanceTimers(3000);
     expect(ReactNoop.flush()).toEqual(['Promise resolved [Result]', 'Result']);
     expect(ReactNoop.getChildren()).toEqual([span('Result')]);
   });
@@ -329,7 +329,7 @@ describe('ReactSuspense', () => {
     expect(ReactNoop.getChildren()).toEqual([span('B'), span('1')]);
   });
 
-  it('keeps working on lower priority work after being unblocked', async () => {
+  it('keeps working on lower priority work after being pinged', async () => {
     function App(props) {
       return (
         <Fallback>
@@ -352,6 +352,36 @@ describe('ReactSuspense', () => {
     await advanceTimers(0);
     expect(ReactNoop.flush()).toEqual(['Promise resolved [A]', 'A', 'B']);
     expect(ReactNoop.getChildren()).toEqual([span('A'), span('B')]);
+  });
+
+  it('tries rendering a lower priority pending update even if a higher priority one suspends', async () => {
+    function App(props) {
+      if (props.hide) {
+        return <Text text="(empty)" />;
+      }
+      return (
+        <Fallback>
+          <AsyncText ms={2000} text="Async" />
+        </Fallback>
+      );
+    }
+
+    // Schedule a high pri update and a low pri update, without rendering in
+    // between.
+    ReactNoop.interactiveUpdates(() => {
+      // High pri
+      ReactNoop.render(<App />);
+    });
+    // Low pri
+    ReactNoop.render(<App hide={true} />);
+
+    expect(ReactNoop.flush()).toEqual([
+      // The first update suspends
+      'Suspend! [Async]',
+      // but we have another pending update that we can work on
+      '(empty)',
+    ]);
+    expect(ReactNoop.getChildren()).toEqual([span('(empty)')]);
   });
 
   it('coalesces all async updates when in a suspended state', async () => {
@@ -465,8 +495,8 @@ describe('ReactSuspense', () => {
 
     // Expire the outer timeout, but don't expire the inner one.
     // We should see the outer loading placeholder.
-    ReactNoop.expire(1000);
-    await advanceTimers(1000);
+    ReactNoop.expire(1500);
+    await advanceTimers(1500);
     expect(ReactNoop.flush()).toEqual([
       'Sync',
       // Still suspended.
@@ -570,8 +600,8 @@ describe('ReactSuspense', () => {
   it('expires early with a `timeout` option', async () => {
     ReactNoop.render(
       <Fragment>
-        <Fallback timeout={100} placeholder={<Text text="Loading..." />}>
-          <AsyncText text="Async" ms={1000} />
+        <Fallback timeout={1000} placeholder={<Text text="Loading..." />}>
+          <AsyncText text="Async" ms={3000} />
         </Fallback>
         <Text text="Sync" />
       </Fragment>,
@@ -589,8 +619,8 @@ describe('ReactSuspense', () => {
     // Advance both React's virtual time and Jest's timers by enough to trigger
     // the timeout, but not by enough to flush the promise or reach the true
     // expiration time.
-    ReactNoop.expire(120);
-    await advanceTimers(120);
+    ReactNoop.expire(2000);
+    await advanceTimers(2000);
     expect(ReactNoop.flush()).toEqual([
       // Still suspended.
       'Suspend! [Async]',
@@ -675,6 +705,91 @@ describe('ReactSuspense', () => {
     // We can now resume rendering
     expect(ReactNoop.flush()).toEqual(['Promise resolved [Async]', 'Async']);
     expect(ReactNoop.getChildren()).toEqual([span('Async')]);
+  });
+
+  it('starts working on an update even if its priority falls between two suspended levels', async () => {
+    function App(props) {
+      return (
+        <Fallback timeout={10000}>
+          {props.text === 'C' ? (
+            <Text text="C" />
+          ) : (
+            <AsyncText text={props.text} ms={10000} />
+          )}
+        </Fallback>
+      );
+    }
+
+    // Schedule an update
+    ReactNoop.render(<App text="A" />);
+    // The update should suspend.
+    expect(ReactNoop.flush()).toEqual(['Suspend! [A]']);
+    expect(ReactNoop.getChildren()).toEqual([]);
+
+    // Advance time until right before it expires. This number may need to
+    // change if the default expiration for low priority updates is adjusted.
+    await advanceTimers(4999);
+    ReactNoop.expire(4999);
+    expect(ReactNoop.flush()).toEqual([]);
+    expect(ReactNoop.getChildren()).toEqual([]);
+
+    // Schedule another low priority update.
+    ReactNoop.render(<App text="B" />);
+    // This update should also suspend.
+    expect(ReactNoop.flush()).toEqual(['Suspend! [B]']);
+    expect(ReactNoop.getChildren()).toEqual([]);
+
+    // Schedule a high priority update. Its expiration time will fall between
+    // the expiration times of the previous two updates.
+    ReactNoop.interactiveUpdates(() => {
+      ReactNoop.render(<App text="C" />);
+    });
+    expect(ReactNoop.flush()).toEqual(['C']);
+    expect(ReactNoop.getChildren()).toEqual([span('C')]);
+
+    await advanceTimers(10000);
+    // Flush the remaining work.
+    expect(ReactNoop.flush()).toEqual([
+      'Promise resolved [A]',
+      'Promise resolved [B]',
+    ]);
+    expect(ReactNoop.getChildren()).toEqual([span('C')]);
+  });
+
+  it('can hide a tree to unblock its surroundings', async () => {
+    function App() {
+      return (
+        <Timeout ms={1000}>
+          {didTimeout => (
+            <Fragment>
+              <div hidden={didTimeout}>
+                <AsyncText text="Async" ms={3000} />
+              </div>
+              {didTimeout ? <Text text="Loading..." /> : null}
+            </Fragment>
+          )}
+        </Timeout>
+      );
+    }
+
+    ReactNoop.render(<App />);
+    expect(ReactNoop.flush()).toEqual(['Suspend! [Async]']);
+    expect(ReactNoop.getChildren()).toEqual([]);
+
+    ReactNoop.expire(2000);
+    await advanceTimers(2000);
+    expect(ReactNoop.flush()).toEqual([
+      'Suspend! [Async]',
+      'Loading...',
+      'Suspend! [Async]',
+    ]);
+    expect(ReactNoop.getChildren()).toEqual([div(), span('Loading...')]);
+
+    ReactNoop.expire(1000);
+    await advanceTimers(1000);
+
+    expect(ReactNoop.flush()).toEqual(['Promise resolved [Async]', 'Async']);
+    expect(ReactNoop.getChildren()).toEqual([div(span('Async'))]);
   });
 
   describe('splitting a high-pri update into high and low', () => {
@@ -817,50 +932,15 @@ describe('ReactSuspense', () => {
       ReactNoop.flush();
       expect(ReactNoop.getChildren()).toEqual([]);
 
-      await advanceTimers(999);
-      ReactNoop.expire(999);
+      await advanceTimers(800);
+      ReactNoop.expire(800);
       ReactNoop.flush();
       expect(ReactNoop.getChildren()).toEqual([]);
 
-      await advanceTimers(1);
-      ReactNoop.expire(1);
+      await advanceTimers(1000);
+      ReactNoop.expire(1000);
       ReactNoop.flush();
       expect(ReactNoop.getChildren()).toEqual([span('A')]);
     });
-
-    it('uses the most recent update as its start time', async () => {
-      ReactNoop.render(<DebouncedText text="A" ms={1000} />);
-      ReactNoop.flush();
-      expect(ReactNoop.getChildren()).toEqual([]);
-
-      // Advance time by a little, but not by enough to move this into a new
-      // expiration bucket.
-      await advanceTimers(10);
-      ReactNoop.expire(10);
-      ReactNoop.flush();
-      expect(ReactNoop.getChildren()).toEqual([]);
-
-      // Schedule an update. It should have the same expiration as the first one.
-      ReactNoop.render(<DebouncedText text="B" ms={1000} />);
-
-      // Advance time by enough that it would have timed-out the first update,
-      // but not enough that it times out the second one.
-      await advanceTimers(999);
-      ReactNoop.expire(999);
-      ReactNoop.flush();
-      expect(ReactNoop.getChildren()).toEqual([]);
-
-      // Advance time by just a bit more to trigger the timeout.
-      await advanceTimers(1);
-      ReactNoop.expire(1);
-      ReactNoop.flush();
-      expect(ReactNoop.getChildren()).toEqual([span('B')]);
-    });
   });
-
-  // TODO:
-  // Timeout inside an async boundary
-  // Promise rejection
-  // Suspending inside an offscreen tree
-  // Timeout for CPU-bound work (if it makes sense to do this?)
 });

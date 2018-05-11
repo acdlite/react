@@ -36,6 +36,7 @@ import {
   ContextProvider,
   ContextConsumer,
   Profiler,
+  TimeoutComponent,
 } from 'shared/ReactTypeOfWork';
 import {
   NoEffect,
@@ -44,6 +45,7 @@ import {
   ContentReset,
   DidCapture,
   Update,
+  Ref,
 } from 'shared/ReactTypeOfSideEffect';
 import {ReactCurrentOwner} from 'shared/ReactGlobalSharedState';
 import {
@@ -91,8 +93,12 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
   newContext: NewContext,
   hydrationContext: HydrationContext<C, CX>,
   scheduleWork: (fiber: Fiber, expirationTime: ExpirationTime) => void,
-  computeExpirationForFiber: (fiber: Fiber) => ExpirationTime,
+  computeExpirationForFiber: (
+    startTime: ExpirationTime,
+    fiber: Fiber,
+  ) => ExpirationTime,
   profilerTimer: ProfilerTimer,
+  recalculateCurrentTime: () => ExpirationTime,
 ) {
   const {shouldSetTextContent, shouldDeprioritizeSubtree} = config;
 
@@ -769,21 +775,6 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
       const prevProps = workInProgress.memoizedProps;
 
       const prevDidTimeout = workInProgress.memoizedState;
-
-      // The update queue is only used to store expired promises, and to
-      // schedule a re-render once an expired promise resolves. It does not
-      // determine whether we should show the placeholder state, because we
-      // always attempt to show the placeholder state on every render.
-      const updateQueue = workInProgress.updateQueue;
-      if (updateQueue !== null) {
-        processUpdateQueue(
-          workInProgress,
-          updateQueue,
-          null,
-          null,
-          renderExpirationTime,
-        );
-      }
 
       // Check if we already attempted to render the normal state. If we did,
       // and we timed out, render the placeholder state.

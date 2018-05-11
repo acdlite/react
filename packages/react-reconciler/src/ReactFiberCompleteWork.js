@@ -40,6 +40,7 @@ import {
   Fragment,
   Mode,
   Profiler,
+  TimeoutComponent,
 } from 'shared/ReactTypeOfWork';
 import {Placement, Ref, Update} from 'shared/ReactTypeOfSideEffect';
 import invariant from 'fbjs/lib/invariant';

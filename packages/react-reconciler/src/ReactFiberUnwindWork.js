@@ -17,7 +17,7 @@ import type {NewContext} from './ReactFiberNewContext';
 import type {CapturedValue} from './ReactCapturedValue';
 import type {ProfilerTimer} from './ReactProfilerTimer';
 import type {Update} from './ReactUpdateQueue';
-import type {SuspenseThenable} from 'shared/SuspenseThenable';
+import type {Thenable} from './ReactFiberScheduler';
 
 import {createCapturedValue} from './ReactCapturedValue';
 import {
@@ -35,6 +35,7 @@ import {
   HostPortal,
   ContextProvider,
   Profiler,
+  TimeoutComponent,
 } from 'shared/ReactTypeOfWork';
 import {
   DidCapture,
@@ -45,18 +46,17 @@ import {
 import {
   enableGetDerivedStateFromCatch,
   enableProfilerTimer,
+  enableSuspense,
 } from 'shared/ReactFeatureFlags';
+
+import {Never, Sync, expirationTimeToMs} from './ReactFiberExpirationTime';
 
 export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
   config: HostConfig<T, P, I, TI, HI, PI, C, CC, CX, PL>,
   hostContext: HostContext<C, CX>,
   legacyContext: LegacyContext,
   newContext: NewContext,
-  scheduleWork: (
-    fiber: Fiber,
-    startTime: ExpirationTime,
-    expirationTime: ExpirationTime,
-  ) => void,
+  scheduleWork: (fiber: Fiber, expirationTime: ExpirationTime) => void,
   computeExpirationForFiber: (
     startTime: ExpirationTime,
     fiber: Fiber,
@@ -66,6 +66,13 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
   isAlreadyFailedLegacyErrorBoundary: (instance: mixed) => boolean,
   onUncaughtError: (error: mixed) => void,
   profilerTimer: ProfilerTimer,
+  suspendRoot: (
+    root: FiberRoot,
+    thenable: Thenable,
+    timeoutMs: number,
+    suspendedTime: ExpirationTime,
+  ) => void,
+  retrySuspendedRoot: (root: FiberRoot, suspendedTime: ExpirationTime) => void,
 ) {
   const {popHostContainer, popHostContext} = hostContext;
   const {
@@ -140,18 +147,14 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
     return update;
   }
 
-  function waitForPromiseAndScheduleRecovery(finishedWork, thenable) {
-    // Await promise
-    const onResolveOrReject = () => {
-      // Once the promise resolves, we should try rendering the non-
-      // placeholder state again.
-      const startTime = recalculateCurrentTime();
-      const expirationTime = computeExpirationForFiber(startTime, finishedWork);
-      const recoveryUpdate = createUpdate(expirationTime);
-      enqueueUpdate(finishedWork, recoveryUpdate, expirationTime);
-      scheduleWork(finishedWork, startTime, expirationTime);
-    };
-    thenable.then(onResolveOrReject, onResolveOrReject);
+  function schedulePing(finishedWork) {
+    // Once the promise resolves, we should try rendering the non-
+    // placeholder state again.
+    const currentTime = recalculateCurrentTime();
+    const expirationTime = computeExpirationForFiber(currentTime, finishedWork);
+    const recoveryUpdate = createUpdate(expirationTime);
+    enqueueUpdate(finishedWork, recoveryUpdate, expirationTime);
+    scheduleWork(finishedWork, expirationTime);
   }
 
   function throwException(
@@ -160,10 +163,8 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
     sourceFiber: Fiber,
     value: mixed,
     renderIsExpired: boolean,
-    remainingTimeMs: number,
-    elapsedMs: number,
-    renderStartTime: number,
     renderExpirationTime: ExpirationTime,
+    currentTimeMs: number,
   ) {
     // The source fiber did not complete.
     sourceFiber.effectTag |= Incomplete;
@@ -177,9 +178,15 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
       typeof value.then === 'function'
     ) {
       // This is a thenable.
-      // Allow var because this is used in a closure.
-      // eslint-disable-next-line no-var
-      var thenable: SuspenseThenable = (value: any);
+      const thenable: Thenable = (value: any);
+
+      const expirationTimeMs = expirationTimeToMs(renderExpirationTime);
+      const startTimeMs = expirationTimeMs - 5000;
+      let elapsedMs = currentTimeMs - startTimeMs;
+      if (elapsedMs < 0) {
+        elapsedMs = 0;
+      }
+      const remainingTimeMs = expirationTimeMs - currentTimeMs;
 
       // Find the earliest timeout of all the timeouts in the ancestor path.
       // TODO: Alternatively, we could store the earliest timeout on the context
@@ -187,31 +194,28 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
       let workInProgress = returnFiber;
       let earliestTimeoutMs = -1;
       searchForEarliestTimeout: do {
-        switch (workInProgress.tag) {
-          case TimeoutComponent: {
-            const current = workInProgress.alternate;
-            if (current !== null && current.memoizedState === true) {
-              // A parent Timeout already committed in a placeholder state. We
-              // need to handle this promise immediately. In other words, we
-              // should never suspend inside a tree that already expired.
+        if (workInProgress.tag === TimeoutComponent) {
+          const current = workInProgress.alternate;
+          if (current !== null && current.memoizedState === true) {
+            // A parent Timeout already committed in a placeholder state. We
+            // need to handle this promise immediately. In other words, we
+            // should never suspend inside a tree that already expired.
+            earliestTimeoutMs = 0;
+            break searchForEarliestTimeout;
+          }
+          let timeoutPropMs = workInProgress.pendingProps.ms;
+          if (typeof timeoutPropMs === 'number') {
+            if (timeoutPropMs <= 0) {
               earliestTimeoutMs = 0;
               break searchForEarliestTimeout;
+            } else if (
+              earliestTimeoutMs === -1 ||
+              timeoutPropMs < earliestTimeoutMs
+            ) {
+              earliestTimeoutMs = timeoutPropMs;
             }
-            let timeoutPropMs = workInProgress.pendingProps.ms;
-            if (typeof timeoutPropMs === 'number') {
-              if (timeoutPropMs <= 0) {
-                earliestTimeoutMs = 0;
-                break searchForEarliestTimeout;
-              } else if (
-                earliestTimeoutMs === -1 ||
-                timeoutPropMs < earliestTimeoutMs
-              ) {
-                earliestTimeoutMs = timeoutPropMs;
-              }
-            } else {
-              earliestTimeoutMs = remainingTimeMs;
-            }
-            break;
+          } else if (earliestTimeoutMs === -1) {
+            earliestTimeoutMs = remainingTimeMs;
           }
         }
         workInProgress = workInProgress.return;
@@ -220,16 +224,16 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
       // Compute the remaining time until the timeout.
       const msUntilTimeout = earliestTimeoutMs - elapsedMs;
 
-      if (msUntilTimeout > 0) {
+      if (renderExpirationTime === Never || msUntilTimeout > 0) {
         // There's still time remaining.
-        suspendRoot(root, thenable, earliestTimeoutMs, renderExpirationTime);
+        suspendRoot(root, thenable, msUntilTimeout, renderExpirationTime);
         const onResolveOrReject = () => {
           retrySuspendedRoot(root, renderExpirationTime);
         };
         thenable.then(onResolveOrReject, onResolveOrReject);
         return;
       } else {
-        // No time remaining. Need to fallback to palceholder.
+        // No time remaining. Need to fallback to placeholder.
         // Find the nearest timeout that can be retried.
         workInProgress = returnFiber;
         do {
@@ -237,27 +241,23 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
             case HostRoot: {
               // The root expired, but no fallback was provided. Throw a
               // helpful error.
-              value = createRootExpirationError(
-                sourceFiber,
-                renderExpirationTime,
-              );
+              const message =
+                renderExpirationTime === Sync
+                  ? 'A synchronous update was suspended, but no fallback UI ' +
+                    'was provided.'
+                  : 'An update was suspended for longer than the timeout, ' +
+                    'but no fallback UI was provided.';
+              value = new Error(message);
               break;
             }
             case TimeoutComponent: {
               if ((workInProgress.effectTag & DidCapture) === NoEffect) {
                 workInProgress.effectTag |= ShouldCapture;
-                const update = createUpdate(renderExpirationTime);
-                // Allow var because this is used in a closure.
-                // eslint-disable-next-line no-var
-                var finishedWork = workInProgress;
-                update.callback = () => {
-                  waitForPromiseAndScheduleRecovery(finishedWork, thenable);
-                };
-                enqueueCapturedUpdate(
+                const onResolveOrReject = schedulePing.bind(
+                  null,
                   workInProgress,
-                  update,
-                  renderExpirationTime,
                 );
+                thenable.then(onResolveOrReject, onResolveOrReject);
                 return;
               }
               // Already captured during this render. Continue to the next
@@ -321,10 +321,7 @@ export default function<T, P, I, TI, HI, PI, C, CC, CX, PL>(
 
   function unwindWork(
     workInProgress: Fiber,
-    elapsedMs: number,
     renderIsExpired: boolean,
-    remainingTimeMs: number,
-    renderStartTime: ExpirationTime,
     renderExpirationTime: ExpirationTime,
   ) {
     switch (workInProgress.tag) {

@@ -151,11 +151,7 @@ export function applyDerivedStateFromProps(
 
 export default function(
   legacyContext: LegacyContext,
-  scheduleWork: (
-    fiber: Fiber,
-    startTime: ExpirationTime,
-    expirationTime: ExpirationTime,
-  ) => void,
+  scheduleWork: (fiber: Fiber, expirationTime: ExpirationTime) => void,
   computeExpirationForFiber: (
     currentTime: ExpirationTime,
     fiber: Fiber,
