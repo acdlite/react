@@ -105,6 +105,7 @@ import {popHostContext, popHostContainer} from './ReactFiberHostContext';
 import {
   checkActualRenderTimeStackEmpty,
   pauseActualRenderTimerIfRunning,
+  recordCommitTime,
   recordElapsedBaseRenderTimeIfRunning,
   resetActualRenderTimer,
   resumeActualRenderTimerIfPaused,
@@ -566,6 +567,10 @@ function commitRoot(finishedWork: Fiber): ExpirationTime {
     }
   }
   stopCommitSnapshotEffectsTimer();
+
+  if (enableProfilerTimer) {
+    recordCommitTime();
+  }
 
   // Commit all the side-effects within a tree. We'll do this in two passes.
   // The first pass performs all the host insertions, updates, deletions and
