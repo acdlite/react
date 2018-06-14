@@ -58,7 +58,8 @@ export type FiberRoot = {
   +hydrate: boolean,
   // Remaining expiration time on this root.
   // TODO: Lift this into the renderer
-  remainingExpirationTime: ExpirationTime,
+  nextExpirationTimeToWorkOn: ExpirationTime,
+  expirationTime: ExpirationTime,
   // List of top-level batches. This list indicates whether a commit should be
   // deferred. Also contains completion callbacks.
   // TODO: Lift this into the renderer
@@ -92,7 +93,8 @@ export function createFiberRoot(
     context: null,
     pendingContext: null,
     hydrate,
-    remainingExpirationTime: NoWork,
+    nextExpirationTimeToWorkOn: NoWork,
+    expirationTime: NoWork,
     firstBatch: null,
     nextScheduledRoot: null,
   };
