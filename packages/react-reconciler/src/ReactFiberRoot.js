@@ -9,7 +9,9 @@
 
 import type {Fiber} from './ReactFiber';
 import type {ExpirationTime} from './ReactFiberExpirationTime';
-import type {PendingWork} from './ReactFiberPendingWork';
+import type {TimeoutHandle, NoTimeout} from './ReactFiberHostConfig';
+
+import {noTimeout} from './ReactFiberHostConfig';
 
 import {createHostRootFiber} from './ReactFiber';
 import {NoWork} from './ReactFiberExpirationTime';
@@ -52,10 +54,10 @@ export type FiberRoot = {
 
   pendingCommitExpirationTime: ExpirationTime,
   // A finished work-in-progress HostRoot that's ready to be committed.
-  // TODO: The reason this is separate from isReadyForCommit is because the
-  // FiberRoot concept will likely be lifted out of the reconciler and into
-  // the renderer.
   finishedWork: Fiber | null,
+  // Timeout handle returned by setTimeout. Used to cancel a pending timeout, if
+  // it's superseded by a new one.
+  timeoutHandle: TimeoutHandle | NoTimeout,
   // Top context object, used by renderSubtreeIntoContainer
   context: Object | null,
   pendingContext: Object | null,
@@ -97,6 +99,7 @@ export function createFiberRoot(
     pendingCommitExpirationTime: NoWork,
     firstPendingWork: null,
     finishedWork: null,
+    timeoutHandle: noTimeout,
     context: null,
     pendingContext: null,
     hydrate,
