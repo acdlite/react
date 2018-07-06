@@ -737,10 +737,10 @@ function resetExpirationTime(
   // Bubble up the earliest expiration time.
   // (And "base" render timers if that feature flag is enabled)
   if (enableProfilerTimer && workInProgress.mode & ProfileMode) {
-    let treeBaseTime = workInProgress.selfBaseTime;
+    let treeBaseDuration = workInProgress.selfBaseDuration;
     let child = workInProgress.child;
     while (child !== null) {
-      treeBaseTime += child.treeBaseTime;
+      treeBaseDuration += child.treeBaseDuration;
       if (
         child.expirationTime !== NoWork &&
         (newExpirationTime === NoWork ||
@@ -750,7 +750,7 @@ function resetExpirationTime(
       }
       child = child.sibling;
     }
-    workInProgress.treeBaseTime = treeBaseTime;
+    workInProgress.treeBaseDuration = treeBaseDuration;
   } else {
     let child = workInProgress.child;
     while (child !== null) {
