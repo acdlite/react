@@ -13,7 +13,7 @@ import type {ExpirationTime} from './ReactFiberExpirationTime';
 import type {SuspenseThenable} from 'shared/SuspenseThenable';
 
 import ReactErrorUtils from 'shared/ReactErrorUtils';
-import {ReactCurrentOwner} from 'shared/ReactGlobalSharedState';
+import ReactSharedInternals from 'shared/ReactSharedInternals';
 import ReactStrictModeWarnings from './ReactStrictModeWarnings';
 import {
   NoEffect,
@@ -156,6 +156,7 @@ export type Thenable = {
   then(resolve: () => mixed, reject?: () => mixed): mixed,
 };
 
+const {ReactCurrentOwner} = ReactSharedInternals;
 const {
   invokeGuardedCallback,
   hasCaughtError,
