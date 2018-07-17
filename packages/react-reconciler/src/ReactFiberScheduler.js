@@ -701,9 +701,7 @@ function commitRoot(root: FiberRoot, finishedWork: Fiber): void {
   isWorking = false;
   stopCommitLifeCyclesTimer();
   stopCommitTimer();
-  if (typeof onCommitRoot === 'function') {
-    onCommitRoot(finishedWork.stateNode);
-  }
+  onCommitRoot(finishedWork.stateNode);
   if (__DEV__ && ReactFiberInstrumentation.debugTool) {
     ReactFiberInstrumentation.debugTool.onCommitWork(finishedWork);
   }
