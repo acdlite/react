@@ -1842,6 +1842,11 @@ function findHighestPriorityRoot() {
         if (root === lastScheduledRoot) {
           break;
         }
+        if (highestPriorityWork === Sync) {
+          // Sync is highest priority by definition so
+          // we can stop searching.
+          break;
+        }
         previousScheduledRoot = root;
         root = root.nextScheduledRoot;
       }
