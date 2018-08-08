@@ -113,15 +113,9 @@ import {
 import {popProvider, resetContextDependences} from './ReactFiberNewContext';
 import {popHostContext, popHostContainer} from './ReactFiberHostContext';
 import {
-  checkActualRenderTimeStackEmpty,
-  pauseActualRenderTimerIfRunning,
   recordCommitTime,
-  recordElapsedActualRenderTime,
-  recordElapsedBaseRenderTimeIfRunning,
-  resetActualRenderTimerStackAfterFatalErrorInDev,
-  resumeActualRenderTimerIfPaused,
-  startBaseRenderTimer,
-  stopBaseRenderTimerIfRunning,
+  startProfilerTimer,
+  stopProfilerTimerIfRunningAndRecordDelta,
 } from './ReactProfilerTimer';
 import {
   checkThatStackIsEmpty,
@@ -313,15 +307,6 @@ if (__DEV__ && replayFailedUnitOfWorkWithInvokeGuardedCallback) {
     originalReplayError = null;
     if (hasCaughtError()) {
       clearCaughtError();
-
-      if (enableProfilerTimer) {
-        if (failedUnitOfWork.mode & ProfileMode) {
-          recordElapsedActualRenderTime(failedUnitOfWork);
-        }
-
-        // Stop "base" render timer again (after the re-thrown error).
-        stopBaseRenderTimerIfRunning();
-      }
     } else {
       // If the begin phase did not fail the second time, set this pointer
       // back to the original value.
@@ -337,12 +322,6 @@ function resetStack() {
   if (nextUnitOfWork !== null) {
     let interruptedWork = nextUnitOfWork.return;
     while (interruptedWork !== null) {
-      if (enableProfilerTimer) {
-        if (interruptedWork.mode & ProfileMode) {
-          // Resume in case we're picking up on work that was paused.
-          resumeActualRenderTimerIfPaused(false);
-        }
-      }
       unwindInterruptedWork(interruptedWork);
       interruptedWork = interruptedWork.return;
     }
@@ -692,17 +671,6 @@ function commitRoot(root: FiberRoot, finishedWork: Fiber): void {
     }
   }
 
-  if (enableProfilerTimer) {
-    if (__DEV__) {
-      if (nextRoot === null) {
-        // Only check this stack once we're done processing async work.
-        // This prevents a false positive that occurs after a batched commit,
-        // If there was in-progress async work before the commit.
-        checkActualRenderTimeStackEmpty();
-      }
-    }
-  }
-
   isCommitting = false;
   isWorking = false;
   stopCommitLifeCyclesTimer();
@@ -742,9 +710,22 @@ function resetChildExpirationTime(
 
   // Bubble up the earliest expiration time.
   if (enableProfilerTimer && workInProgress.mode & ProfileMode) {
-    // We're in profiling mode. Let's use this same traversal to update the
-    // "base" render times.
+    // We're in profiling mode.
+    // Let's use this same traversal to update the render durations.
+    let actualDuration = workInProgress.actualDuration;
     let treeBaseDuration = workInProgress.selfBaseDuration;
+
+    // When a fiber is cloned, its actualDuration is reset to 0.
+    // This value will only be updated if work is done on the fiber (i.e. it doesn't bailout).
+    // When work is done, it should bubble to the parent's actualDuration.
+    // If the fiber has not been cloned though, (meaning no work was done),
+    // Then this value will reflect the amount of time spent working on a previous render.
+    // In that case it should not bubble.
+    // We determine whether it was cloned by comparing the child pointer.
+    const shouldBubbleActualDurations =
+      workInProgress.alternate === null ||
+      workInProgress.child !== workInProgress.alternate.child;
+
     let child = workInProgress.child;
     while (child !== null) {
       const childUpdateExpirationTime = child.expirationTime;
@@ -763,9 +744,13 @@ function resetChildExpirationTime(
       ) {
         newChildExpirationTime = childChildExpirationTime;
       }
+      if (shouldBubbleActualDurations) {
+        actualDuration += child.actualDuration;
+      }
       treeBaseDuration += child.treeBaseDuration;
       child = child.sibling;
     }
+    workInProgress.actualDuration = actualDuration;
     workInProgress.treeBaseDuration = treeBaseDuration;
   } else {
     let child = workInProgress.child;
@@ -812,11 +797,28 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
 
     if ((workInProgress.effectTag & Incomplete) === NoEffect) {
       // This fiber completed.
-      nextUnitOfWork = completeWork(
-        current,
-        workInProgress,
-        nextRenderExpirationTime,
-      );
+      if (enableProfilerTimer) {
+        if (workInProgress.mode & ProfileMode) {
+          startProfilerTimer(workInProgress);
+        }
+
+        nextUnitOfWork = completeWork(
+          current,
+          workInProgress,
+          nextRenderExpirationTime,
+        );
+
+        if (workInProgress.mode & ProfileMode) {
+          // Update render duration assuming we didn't error.
+          stopProfilerTimerIfRunningAndRecordDelta(workInProgress, false);
+        }
+      } else {
+        nextUnitOfWork = completeWork(
+          current,
+          workInProgress,
+          nextRenderExpirationTime,
+        );
+      }
       let next = nextUnitOfWork;
       stopWorkTimer(workInProgress);
       resetChildExpirationTime(workInProgress, nextRenderExpirationTime);
@@ -887,6 +889,11 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
         return null;
       }
     } else {
+      if (workInProgress.mode & ProfileMode) {
+        // Record the render duration for the fiber that errored.
+        stopProfilerTimerIfRunningAndRecordDelta(workInProgress, false);
+      }
+
       // This fiber did not complete because something threw. Pop values off
       // the stack without entering the complete phase. If this is a boundary,
       // capture values if possible.
@@ -907,6 +914,19 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
         stopWorkTimer(workInProgress);
         if (__DEV__ && ReactFiberInstrumentation.debugTool) {
           ReactFiberInstrumentation.debugTool.onCompleteWork(workInProgress);
+        }
+
+        if (enableProfilerTimer) {
+          // Include the time spent working on failed children before continuing.
+          if (next.mode & ProfileMode) {
+            let actualDuration = next.actualDuration;
+            let child = next.child;
+            while (child !== null) {
+              actualDuration += child.actualDuration;
+              child = child.sibling;
+            }
+            next.actualDuration = actualDuration;
+          }
         }
 
         // If completing this work spawned new work, do that next. We'll come
@@ -969,15 +989,14 @@ function performUnitOfWork(workInProgress: Fiber): Fiber | null {
   let next;
   if (enableProfilerTimer) {
     if (workInProgress.mode & ProfileMode) {
-      startBaseRenderTimer();
+      startProfilerTimer(workInProgress);
     }
 
     next = beginWork(current, workInProgress, nextRenderExpirationTime);
 
     if (workInProgress.mode & ProfileMode) {
-      // Update "base" time if the render wasn't bailed out on.
-      recordElapsedBaseRenderTimeIfRunning(workInProgress);
-      stopBaseRenderTimerIfRunning();
+      // Record the render duration assuming we didn't bailout (or error).
+      stopProfilerTimerIfRunningAndRecordDelta(workInProgress, true);
     }
   } else {
     next = beginWork(current, workInProgress, nextRenderExpirationTime);
@@ -1017,12 +1036,6 @@ function workLoop(isYieldy) {
     // Flush asynchronous work until the deadline runs out of time.
     while (nextUnitOfWork !== null && !shouldYield()) {
       nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
-    }
-
-    if (enableProfilerTimer) {
-      // If we didn't finish, pause the "actual" render timer.
-      // We'll restart it when we resume work.
-      pauseActualRenderTimerIfRunning();
     }
   }
 }
@@ -1069,11 +1082,6 @@ function renderRoot(
     try {
       workLoop(isYieldy);
     } catch (thrownValue) {
-      if (enableProfilerTimer) {
-        // Stop "base" render timer in the event of an error.
-        stopBaseRenderTimerIfRunning();
-      }
-
       if (nextUnitOfWork === null) {
         // This is a fatal error.
         didFatal = true;
@@ -1140,10 +1148,6 @@ function renderRoot(
     // There was a fatal error.
     if (__DEV__) {
       resetStackAfterFatalErrorInDev();
-
-      // Reset the DEV fiber stack in case we're profiling roots.
-      // (We do this for profiling bulds when DevTools is detected.)
-      resetActualRenderTimerStackAfterFatalErrorInDev();
     }
     // `nextRoot` points to the in-progress root. A non-null value indicates
     // that we're in the middle of an async render. Set it to null to indicate
@@ -1872,10 +1876,6 @@ function performWork(minExpirationTime: ExpirationTime, dl: Deadline | null) {
   // the deadline.
   findHighestPriorityRoot();
 
-  if (enableProfilerTimer) {
-    resumeActualRenderTimerIfPaused(minExpirationTime === Sync);
-  }
-
   if (deadline !== null) {
     recomputeCurrentRendererTime();
     currentSchedulerTime = currentRendererTime;
@@ -1948,7 +1948,6 @@ function flushRoot(root: FiberRoot, expirationTime: ExpirationTime) {
   performWorkOnRoot(root, expirationTime, true);
   // Flush any sync work that was scheduled by lifecycles
   performSyncWork();
-  pauseActualRenderTimerIfRunning();
 }
 
 function finishRendering() {
@@ -2050,12 +2049,6 @@ function performWorkOnRoot(
           // There's no time left. Mark this root as complete. We'll come
           // back and commit it later.
           root.finishedWork = finishedWork;
-
-          if (enableProfilerTimer) {
-            // If we didn't finish, pause the "actual" render timer.
-            // We'll restart it when we resume work.
-            pauseActualRenderTimerIfRunning();
-          }
         }
       }
     }
