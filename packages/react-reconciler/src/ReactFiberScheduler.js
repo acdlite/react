@@ -1872,7 +1872,7 @@ function performSyncWork() {
 function performWork(minExpirationTime: ExpirationTime, dl: Deadline | null) {
   deadline = dl;
 
-  // Keep working on roots until there's no more work, or until the we reach
+  // Keep working on roots until there's no more work, or until we reach
   // the deadline.
   findHighestPriorityRoot();
 
