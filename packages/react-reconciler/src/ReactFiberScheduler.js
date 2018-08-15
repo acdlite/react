@@ -12,7 +12,11 @@ import type {FiberRoot, Batch} from './ReactFiberRoot';
 import type {ExpirationTime} from './ReactFiberExpirationTime';
 import type {SuspenseThenable} from 'shared/SuspenseThenable';
 
-import ReactErrorUtils from 'shared/ReactErrorUtils';
+import {
+  invokeGuardedCallback,
+  hasCaughtError,
+  clearCaughtError,
+} from 'shared/ReactErrorUtils';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import ReactStrictModeWarnings from './ReactStrictModeWarnings';
 import {
@@ -152,11 +156,6 @@ export type Thenable = {
 };
 
 const {ReactCurrentOwner} = ReactSharedInternals;
-const {
-  invokeGuardedCallback,
-  hasCaughtError,
-  clearCaughtError,
-} = ReactErrorUtils;
 
 let didWarnAboutStateTransition;
 let didWarnSetStateChildContext;
