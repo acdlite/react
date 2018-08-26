@@ -140,6 +140,14 @@ const bundles = [
     externals: ['react', 'stream'],
   },
 
+  {
+    label: 'dom-server-suspense',
+    bundleTypes: [NODE_DEV, NODE_PROD],
+    moduleType: NON_FIBER_RENDERER,
+    entry: 'react-dom/server.suspense',
+    externals: ['react', 'stream'],
+  },
+
   /******* React ART *******/
   {
     label: 'art',

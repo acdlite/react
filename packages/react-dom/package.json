@@ -27,6 +27,7 @@
     "server.js",
     "server.browser.js",
     "server.node.js",
+    "server.suspense.js",
     "test-utils.js",
     "unstable-native-dependencies.js",
     "cjs/",

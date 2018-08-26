@@ -16,7 +16,7 @@ export const enableUserTimingAPI = __DEV__;
 // render phase
 export const enableGetDerivedStateFromCatch = false;
 // Suspense
-export const enableSuspense = false;
+export const enableSuspense = true;
 // Helps identify side effects in begin-phase lifecycle hooks and setState reducers:
 export const debugRenderPhaseSideEffects = false;
 
