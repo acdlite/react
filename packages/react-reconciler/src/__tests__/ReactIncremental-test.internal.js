@@ -1115,6 +1115,29 @@ describe('ReactIncremental', () => {
     expect(ops).toEqual(['Foo', 'Bar', 'Baz', 'Bar', 'Baz']);
   });
 
+  it('should clear forceUpdate after update is flushed', () => {
+    let a = 0;
+
+    class Foo extends React.PureComponent {
+      render() {
+        const msg = `A: ${a}, B: ${this.props.b}`;
+        ReactNoop.yield(msg);
+        return msg;
+      }
+    }
+
+    const foo = React.createRef(null);
+    ReactNoop.render(<Foo ref={foo} b={0} />);
+    expect(ReactNoop.flush()).toEqual(['A: 0, B: 0']);
+
+    a = 1;
+    foo.current.forceUpdate();
+    expect(ReactNoop.flush()).toEqual(['A: 1, B: 0']);
+
+    ReactNoop.render(<Foo ref={foo} b={0} />);
+    expect(ReactNoop.flush()).toEqual([]);
+  });
+
   xit('can call sCU while resuming a partly mounted component', () => {
     let ops = [];
 
@@ -1462,6 +1485,39 @@ describe('ReactIncremental', () => {
       'componentDidUpdate',
     ]);
     expect(instance.state).toEqual({foo: 'foo'});
+  });
+
+  it('does not call getDerivedStateFromProps if neither state nor props have changed', () => {
+    class Parent extends React.Component {
+      state = {parentRenders: 0};
+      static getDerivedStateFromProps(props, prevState) {
+        ReactNoop.yield('getDerivedStateFromProps');
+        return prevState.parentRenders + 1;
+      }
+      render() {
+        ReactNoop.yield('Parent');
+        return <Child parentRenders={this.state.parentRenders} ref={child} />;
+      }
+    }
+
+    class Child extends React.Component {
+      render() {
+        ReactNoop.yield('Child');
+        return this.props.parentRenders;
+      }
+    }
+
+    const child = React.createRef(null);
+    ReactNoop.render(<Parent />);
+    expect(ReactNoop.flush()).toEqual([
+      'getDerivedStateFromProps',
+      'Parent',
+      'Child',
+    ]);
+
+    // Schedule an update on the child. The parent should not re-render.
+    child.current.setState({});
+    expect(ReactNoop.flush()).toEqual(['Child']);
   });
 
   xit('does not call componentWillReceiveProps for state-only updates', () => {
@@ -1974,6 +2030,39 @@ describe('ReactIncremental', () => {
     ]);
   });
 
+  it('does not leak own context into context provider (factory components)', () => {
+    const ops = [];
+    function Recurse(props, context) {
+      return {
+        getChildContext() {
+          return {n: (context.n || 3) - 1};
+        },
+        render() {
+          ops.push('Recurse ' + JSON.stringify(context));
+          if (context.n === 0) {
+            return null;
+          }
+          return <Recurse />;
+        },
+      };
+    }
+    Recurse.contextTypes = {
+      n: PropTypes.number,
+    };
+    Recurse.childContextTypes = {
+      n: PropTypes.number,
+    };
+
+    ReactNoop.render(<Recurse />);
+    ReactNoop.flush();
+    expect(ops).toEqual([
+      'Recurse {}',
+      'Recurse {"n":2}',
+      'Recurse {"n":1}',
+      'Recurse {"n":0}',
+    ]);
+  });
+
   it('provides context when reusing work', () => {
     const ops = [];
 
@@ -2347,6 +2436,7 @@ describe('ReactIncremental', () => {
     expect(ReactNoop.flush).toWarnDev(
       'componentWillReceiveProps: Please update the following components ' +
         'to use static getDerivedStateFromProps instead: MyComponent',
+      {withoutStack: true},
     );
 
     expect(ops).toEqual([

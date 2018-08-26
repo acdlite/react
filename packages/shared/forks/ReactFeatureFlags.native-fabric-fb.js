@@ -7,7 +7,7 @@
  * @flow
  */
 
-import invariant from 'fbjs/lib/invariant';
+import invariant from 'shared/invariant';
 
 import typeof * as FeatureFlagsType from 'shared/ReactFeatureFlags';
 import typeof * as FabricFeatureFlagsType from './ReactFeatureFlags.native-fabric-fb';
@@ -18,12 +18,10 @@ export const enableUserTimingAPI = __DEV__;
 export const enableGetDerivedStateFromCatch = false;
 export const enableSuspense = false;
 export const warnAboutDeprecatedLifecycles = false;
+export const warnAboutLegacyContextAPI = __DEV__;
 export const replayFailedUnitOfWorkWithInvokeGuardedCallback = __DEV__;
-
-// React Fabric uses persistent reconciler.
-export const enableMutatingReconciler = false;
-export const enableNoopReconciler = false;
-export const enablePersistentReconciler = true;
+export const enableProfilerTimer = __PROFILE__;
+export const enableInteractionTracking = false;
 
 // Only used in www builds.
 export function addUserTimingListener() {

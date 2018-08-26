@@ -16,10 +16,10 @@ import {
   REACT_FRAGMENT_TYPE,
   REACT_ASYNC_MODE_TYPE,
   REACT_STRICT_MODE_TYPE,
-  REACT_TIMEOUT_TYPE,
+  REACT_PLACEHOLDER_TYPE,
 } from 'shared/ReactSymbols';
 
-import invariant from 'fbjs/lib/invariant';
+import invariant from 'shared/invariant';
 import {Namespaces, getIntrinsicNamespace} from '../shared/DOMNamespaces';
 import omittedCloseTags from '../shared/omittedCloseTags';
 import {createOpenTagMarkup} from './ReactPartialRenderer';
@@ -30,7 +30,7 @@ import {
   FunctionalComponent,
   Fragment,
   HostText,
-  TimeoutComponent,
+  PlaceholderComponent,
 } from 'shared/ReactTypeOfWork';
 import {
   StrictMode,
@@ -393,7 +393,7 @@ export function ReactHTMLStream(stream: Stream, rootNode: ReactNode) {
     if (chunk.props !== props) {
       // Timeout components are split into their own chunks.
       // TODO: Is there a better way to check if we're at the top of the stack?
-      const childChunk = createChunk(TimeoutComponent);
+      const childChunk = createChunk(PlaceholderComponent);
       childChunk.return = chunk;
       const childChunkId = createUniqueId();
       childChunk.id = childChunkId;
@@ -428,7 +428,12 @@ export function ReactHTMLStream(stream: Stream, rootNode: ReactNode) {
 
     const render = props.children;
     const didTimeout = chunk.state;
-    const children = render(didTimeout);
+    let children;
+    if (typeof render === "function") {
+      children = children(didTimeout);
+    } else {
+      children = didTimeout ? props.fallback : render;
+    }
     renderChild(boundary, chunk, children, null, hostContext, legacyContext);
   }
 
@@ -468,7 +473,7 @@ export function ReactHTMLStream(stream: Stream, rootNode: ReactNode) {
         let chunk = returnChunk;
         do {
           switch (chunk.tag) {
-            case TimeoutComponent: {
+            case PlaceholderComponent: {
               const timeoutBoundary = chunk.stateNode;
               const didAlreadyTimeout = chunk.state;
               if (!didAlreadyTimeout) {
@@ -590,7 +595,7 @@ export function ReactHTMLStream(stream: Stream, rootNode: ReactNode) {
         }
         return renderArray(boundary, chunk, props, hostContext, legacyContext);
       }
-      case TimeoutComponent: {
+      case PlaceholderComponent: {
         return renderTimeout(
           boundary,
           chunk,
@@ -712,8 +717,8 @@ export function ReactHTMLStream(stream: Stream, rootNode: ReactNode) {
                   props = child.props.children;
                   break;
                 }
-                case REACT_TIMEOUT_TYPE: {
-                  typeOfWork = TimeoutComponent;
+                case REACT_PLACEHOLDER_TYPE: {
+                  typeOfWork = PlaceholderComponent;
                   props = child.props;
                   break;
                 }

@@ -8,15 +8,11 @@
  */
 
 // TODO: direct imports like some-package/src/* are bad. Fix me.
-import ReactDebugCurrentFiber from 'react-reconciler/src/ReactDebugCurrentFiber';
-import warning from 'fbjs/lib/warning';
+import {getCurrentFiberOwnerNameInDevOrNull} from 'react-reconciler/src/ReactCurrentFiber';
+import warning from 'shared/warning';
 
 import ReactControlledValuePropTypes from '../shared/ReactControlledValuePropTypes';
-
-const {
-  getCurrentFiberOwnerName,
-  getCurrentFiberStackAddendum,
-} = ReactDebugCurrentFiber;
+import {getToStringValue, toString} from './ToStringValue';
 
 let didWarnValueDefaultValue;
 
@@ -26,13 +22,12 @@ if (__DEV__) {
 
 type SelectWithWrapperState = HTMLSelectElement & {
   _wrapperState: {
-    initialValue: ?string,
     wasMultiple: boolean,
   },
 };
 
 function getDeclarationErrorAddendum() {
-  const ownerName = getCurrentFiberOwnerName();
+  const ownerName = getCurrentFiberOwnerNameInDevOrNull();
   if (ownerName) {
     return '\n\nCheck the render method of `' + ownerName + '`.';
   }
@@ -45,11 +40,7 @@ const valuePropNames = ['value', 'defaultValue'];
  * Validation function for `value` and `defaultValue`.
  */
 function checkSelectPropTypes(props) {
-  ReactControlledValuePropTypes.checkPropTypes(
-    'select',
-    props,
-    getCurrentFiberStackAddendum,
-  );
+  ReactControlledValuePropTypes.checkPropTypes('select', props);
 
   for (let i = 0; i < valuePropNames.length; i++) {
     const propName = valuePropNames[i];
@@ -107,7 +98,7 @@ function updateOptions(
   } else {
     // Do not set `select.value` as exact behavior isn't consistent across all
     // browsers for all cases.
-    let selectedValue = '' + (propValue: string);
+    let selectedValue = toString(getToStringValue((propValue: any)));
     let defaultSelected = null;
     for (let i = 0; i < options.length; i++) {
       if (options[i].value === selectedValue) {
@@ -155,9 +146,7 @@ export function initWrapperState(element: Element, props: Object) {
     checkSelectPropTypes(props);
   }
 
-  const value = props.value;
   node._wrapperState = {
-    initialValue: value != null ? value : props.defaultValue,
     wasMultiple: !!props.multiple,
   };
 
@@ -193,10 +182,6 @@ export function postMountWrapper(element: Element, props: Object) {
 
 export function postUpdateWrapper(element: Element, props: Object) {
   const node = ((element: any): SelectWithWrapperState);
-  // After the initial mount, we control selected-ness manually so don't pass
-  // this value down
-  node._wrapperState.initialValue = undefined;
-
   const wasMultiple = node._wrapperState.wasMultiple;
   node._wrapperState.wasMultiple = !!props.multiple;
 

@@ -1,3 +1,3 @@
 'use strict';
 
-module.exports = require('./server.node');
+module.exports = require('./server.suspense');

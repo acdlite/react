@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import ExecutionEnvironment from 'fbjs/lib/ExecutionEnvironment';
+import ExecutionEnvironment from 'shared/ExecutionEnvironment';
 
 let contentKey = null;
 
