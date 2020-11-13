@@ -4784,7 +4784,6 @@ describe('Profiler', () => {
 
       if (__DEV__) {
         // @gate dfsEffectsRefactor
-        // @gate enableDoubleInvokingEffects
         it('double invoking does not disconnect wrapped async work', () => {
           ReactFeatureFlags.enableDoubleInvokingEffects = true;
 

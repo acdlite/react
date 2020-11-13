@@ -47,7 +47,8 @@ const environmentFlags = {
 
   // Turn this flag back on (or delete) once the effect list is removed in favor
   // of a depth-first traversal using `subtreeTags`.
-  dfsEffectsRefactor: false,
+  // TODO: Delete this flag
+  dfsEffectsRefactor: __VARIANT__,
 };
 
 function getTestFlags() {
